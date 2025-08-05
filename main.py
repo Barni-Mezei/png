@@ -47,6 +47,32 @@ def generate_chunk_IHDR() -> bytearray:
 
     return out
 
+def generate_chunk_IDAT(color_matrix : list) -> bytearray:
+    """
+    color_matrix(list) -> bytearray A 1 dimensional array containing touples, in the following format: `[(r, g, b, a), (r, g, b, a)]`
+    """
+    
+    print("Generating IDAT chunk...")
+
+    out = bytearray()
+
+    chunk_data_bytes = bytearray([0x49, 0x44, 0x41, 0x54]) # Chunk name IDAT
+
+    for r, g, b, a in color_matrix:
+        chunk_data_bytes += bytearray(r.to_bytes(1, 'big')) 
+        chunk_data_bytes += bytearray(g.to_bytes(1, 'big')) 
+        chunk_data_bytes += bytearray(b.to_bytes(1, 'big')) 
+        chunk_data_bytes += bytearray(a.to_bytes(1, 'big')) 
+
+    chunk_crc = generate_crc(chunk_data_bytes)
+
+    chunk_size = len(chunk_data_bytes) - 4 # Not counting the chunk name (4 bytes)
+
+    out += chunk_size.to_bytes(4, 'big')
+    out += chunk_data_bytes
+    out += chunk_crc.to_bytes(4, 'big')
+
+    return out
 
 def generate_chunk_IEND() -> bytearray:
     print("Generating IEND chunk...")
@@ -73,10 +99,19 @@ if __name__ == "__main__":
 
     print("Stated generation...")
 
+    image_data = [
+        (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255),
+        (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255),
+        (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255),
+        (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255),
+        (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255),
+    ]
+
     # The magic header for every PNG
     f.write(bytearray([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) 
 
     f.write( generate_chunk_IHDR() )
+    f.write( generate_chunk_IDAT(image_data) )
     f.write( generate_chunk_IEND() )
 
     print("Closing file...")
