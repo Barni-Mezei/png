@@ -1,3 +1,13 @@
+"""
+TODO:
+- generate PNG from 2d array (rotated) of RGBA colors (truecolor + alpha)
+- generate PNG from 2d array (rotated) color indexes (palette based)
+- generate PNG from array of strings (packed image format, palette based)
+- generate PNG from array of RGBA colors (truecolor + alpha)
+"""
+
+import zlib
+
 def generate_crc(data : bytearray) -> int:
     crc = 0xFFFFFFFF
     poly = 0xEDB88320
@@ -47,9 +57,9 @@ def generate_chunk_IHDR() -> bytearray:
 
     return out
 
-def generate_chunk_IDAT(color_matrix : list) -> bytearray:
+def generate_chunk_IDAT_2drgb(rgb_2d_matrix : list) -> bytearray:
     """
-    color_matrix(list) -> bytearray A 1 dimensional array containing touples, in the following format: `[(r, g, b, a), (r, g, b, a)]`
+    color_matrix(list<list<tuple<r, g, b, a>>>) -> bytearray A 2 dimensional array containing arrays, which are containing touples, in the following format: `line: [(r, g, b, a), (r, g, b, a)]`
     """
     
     print("Generating IDAT chunk...")
@@ -58,11 +68,16 @@ def generate_chunk_IDAT(color_matrix : list) -> bytearray:
 
     chunk_data_bytes = bytearray([0x49, 0x44, 0x41, 0x54]) # Chunk name IDAT
 
-    for r, g, b, a in color_matrix:
-        chunk_data_bytes += bytearray(r.to_bytes(1, 'big')) 
-        chunk_data_bytes += bytearray(g.to_bytes(1, 'big')) 
-        chunk_data_bytes += bytearray(b.to_bytes(1, 'big')) 
-        chunk_data_bytes += bytearray(a.to_bytes(1, 'big')) 
+    chunk_data_bytes += bytearray([0x78, 0x01]) # Zlib header (no compression)
+
+    for line in rgb_2d_matrix:
+        chunk_data_bytes += bytearray([0x00]) # Scanline filtering method
+    
+        for r, g, b, a in line:
+            chunk_data_bytes += bytearray(r.to_bytes(1, 'big'))
+            chunk_data_bytes += bytearray(g.to_bytes(1, 'big'))
+            chunk_data_bytes += bytearray(b.to_bytes(1, 'big'))
+            chunk_data_bytes += bytearray(a.to_bytes(1, 'big'))
 
     chunk_crc = generate_crc(chunk_data_bytes)
 
@@ -94,24 +109,23 @@ def generate_chunk_IEND() -> bytearray:
 if __name__ == "__main__":
     print("Opening file...")
 
-
     f = open("test.png", "bw")
 
     print("Stated generation...")
 
     image_data = [
-        (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255),
-        (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255),
-        (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255),
-        (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255),
-        (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255),
+        [ (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255) ],
+        [ (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255) ],
+        [ (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255) ],
+        [ (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255) ],
+        [ (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255) ],
     ]
 
     # The magic header for every PNG
     f.write(bytearray([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])) 
 
     f.write( generate_chunk_IHDR() )
-    f.write( generate_chunk_IDAT(image_data) )
+    f.write( generate_chunk_IDAT_2drgb(image_data) )
     f.write( generate_chunk_IEND() )
 
     print("Closing file...")
