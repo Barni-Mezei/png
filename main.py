@@ -68,16 +68,18 @@ def generate_chunk_IDAT_2drgb(rgb_2d_matrix : list) -> bytearray:
 
     chunk_data_bytes = bytearray([0x49, 0x44, 0x41, 0x54]) # Chunk name IDAT
 
-    chunk_data_bytes += bytearray([0x78, 0x01]) # Zlib header (no compression)
+    pixel_data = bytearray()
 
     for line in rgb_2d_matrix:
-        chunk_data_bytes += bytearray([0x00]) # Scanline filtering method
+        pixel_data += bytearray([0x00]) # Scanline filtering method
     
         for r, g, b, a in line:
-            chunk_data_bytes += bytearray(r.to_bytes(1, 'big'))
-            chunk_data_bytes += bytearray(g.to_bytes(1, 'big'))
-            chunk_data_bytes += bytearray(b.to_bytes(1, 'big'))
-            chunk_data_bytes += bytearray(a.to_bytes(1, 'big'))
+            pixel_data += bytearray(r.to_bytes(1, 'big'))
+            pixel_data += bytearray(g.to_bytes(1, 'big'))
+            pixel_data += bytearray(b.to_bytes(1, 'big'))
+            pixel_data += bytearray(a.to_bytes(1, 'big'))
+
+    chunk_data_bytes += bytearray(zlib.compress(pixel_data))
 
     chunk_crc = generate_crc(chunk_data_bytes)
 
@@ -114,11 +116,11 @@ if __name__ == "__main__":
     print("Stated generation...")
 
     image_data = [
-        [ (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255) ],
-        [ (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255) ],
-        [ (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255) ],
-        [ (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255) ],
-        [ (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255), (255,0,0,255) ],
+        [ (0,0,0,255), (0,0,0,255), (0,0,0,255), (0,0,0,255), (0,0,0,255) ],
+        [ (0,0,0,255), (255,255,255,255), (0,0,0,255), (255,255,255,255), (0,0,0,255) ],
+        [ (0,0,0,255), (0,0,0,255), (0,0,0,255), (0,0,0,255), (0,0,0,255) ],
+        [ (0,0,0,255), (255,255,255,255), (255,255,255,255), (255,255,255,255), (0,0,0,255) ],
+        [ (0,0,0,255), (0,0,0,255), (0,0,0,255), (0,0,0,255), (0,0,0,255) ],
     ]
 
     # The magic header for every PNG
