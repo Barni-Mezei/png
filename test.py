@@ -47,8 +47,10 @@ for key in image_data["chunks"]:
                 print(f" - {data_key}: {image_data["chunks"][key]["data"][data_key]}")
         
         case "PLTE":
-            for data_key in image_data["chunks"][key]["data"]:
-                print(f" - {data_key}: {image_data["chunks"][key]["data"][data_key]}")
+            for index, color in enumerate(image_data["chunks"][key]["data"]):
+                ansi_code = f"\033[38;2;{color[0]};{color[1]};{color[2]}m"
+                reset_code = "\033[0m"
+                print(f" - {index:>3}: ({ansi_code}██{reset_code}) {color}")
 
         case "IDAT":
             for data_item in image_data["chunks"][key]["data"]["matrix"]:
@@ -73,7 +75,7 @@ for key in image_data["chunks"]:
                 print(f" - {i}: {f}")
 
 
-        case "tEXT":
+        case "tEXt":
             print(f" '{image_data["chunks"][key]["data"]["key"]}': '{image_data["chunks"][key]["data"]["value"]}'")
 
         case "zTXt":

@@ -6,8 +6,8 @@ TODO:
 - generate PNG from array of RGBA colors (truecolor + alpha)
 
 - handle multiple IDAT chunks
+- handle interalcing
 
-- PLTE read color
 - tRNS set palette color alpha values
 
 - convert indexed to rgba matrix
@@ -15,6 +15,7 @@ TODO:
 
 Resources:
 https://www.nayuki.io/page/png-file-chunk-inspector
+https://www.w3.org/TR/png-3/
 
 """
 
@@ -303,14 +304,14 @@ class PNG:
                     out["chunks"]["IHDR"]["data"]["interlace_method"] = int.from_bytes(chunk_data_bytes[:1])
                     chunk_data_bytes = chunk_data_bytes[1:]
 
-                    if self.log_level > 0: print(out["chunks"]["IHDR"]["data"])
+                    if self.log_level > 1: print(out["chunks"]["IHDR"]["data"])
 
                 case "PLTE":
                     chunk_data_bytes = out["chunks"]["PLTE"]["data_bytes"]
 
                     out["chunks"]["PLTE"]["data"] = []
 
-                    for i in range(int(chunk_data_bytes / 3)):
+                    for i in range(int(len(chunk_data_bytes) / 3)):
                         data_offset = i * 3
 
                         r = int.from_bytes(chunk_data_bytes[data_offset:data_offset+1])
@@ -319,7 +320,7 @@ class PNG:
                         
                         out["chunks"]["PLTE"]["data"].append([r, g, b, 255])
 
-                    if self.log_level > 0: print(out["chunks"]["PLTE"]["data"])
+                    if self.log_level > 1: print(out["chunks"]["PLTE"]["data"])
 
                 case "IDAT":
                     chunk_data_bytes = zlib.decompress( out["chunks"]["IDAT"]["data_bytes"])
@@ -410,12 +411,11 @@ class PNG:
 
                                         if left_edge and top_edge: pixel_value[channel] += self._paeth_predictor(a[channel], b[channel], c[channel])
 
-
-
+                            # Create RGBA format
                             match out["chunks"]["IHDR"]["data"]["color_type"]:
                                 case PNG._color_type_grayscale:
                                     # Convert to grayscale image
-                                    brightness = pixel_value[0] 
+                                    brightness = pixel_value[0]
                                     pixel_value = [brightness, brightness, brightness, 255]
 
                                 case PNG._color_type_truecolor:
@@ -423,15 +423,16 @@ class PNG:
                                     pixel_value += [255]
 
                                 case PNG._color_type_indexed:
-                                    pass # TODO
+                                    # Replace with color from the palette
+                                    pixel_value = out["chunks"]["PLTE"]["data"][pixel_value[0]]
 
                             out["chunks"]["IDAT"]["data"]["matrix"][y][x] = [c % 256 for c in pixel_value]
 
 
-                case "tEXT":
-                    chunk_data_bytes = out["chunks"]["tEXT"]["data_bytes"]
+                case "tEXt":
+                    chunk_data_bytes = out["chunks"]["tEXt"]["data_bytes"]
 
-                    out["chunks"]["tEXT"]["data"] = {
+                    out["chunks"]["tEXt"]["data"] = {
                         "key": "",
                         "value": "",
                     }
@@ -439,14 +440,14 @@ class PNG:
                     destination = "key"
 
                     while len(chunk_data_bytes) > 0:
-                        character = int.from_bytes(chunk_data_bytes[:1])
+                        character = chunk_data_bytes[:1]
                         chunk_data_bytes = chunk_data_bytes[1:]
                         
-                        if character == 0:
+                        if character == b"\00":
                             destination = "value"
                             continue
 
-                        out["chunks"]["tEXT"]["data"][destination] += str(character, encoding="ascii")
+                        out["chunks"]["tEXt"]["data"][destination] += str(character, encoding="ascii")
                 
                 case "zTXt":
                     chunk_data_bytes = out["chunks"]["zTXt"]["data_bytes"]
