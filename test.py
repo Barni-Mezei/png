@@ -41,15 +41,26 @@ for key in image_data["chunks"]:
                 for pixel in data_item:
                     ansi_code = f"\033[38;2;{pixel[0]};{pixel[1]};{pixel[2]}m"
                     reset_code = "\033[0m"
-                    print(f"{ansi_code}██", end=reset_code)
+                    #print(f"{ansi_code}██", end=reset_code)
+                    print(f"{ansi_code}##", end=reset_code)
                 print()
-            print("Filter types:", image_data["chunks"][key]["data"]["filter"])
+
+            # Count filers
+            filters = [0, 0, 0, 0, 0]
+
+            for f in image_data["chunks"][key]["data"]["filter"]:
+                filters[f] += 1
+
+            print("Filter types:")
+            for i, f in enumerate(filters):
+                print(f" - {i}: {f}")
+
 
         case "tEXT":
-            print(f" {image_data["chunks"][key]["data"]["key"]}: {image_data["chunks"][key]["data"]["value"]}")
+            print(f" '{image_data["chunks"][key]["data"]["key"]}': '{image_data["chunks"][key]["data"]["value"]}'")
 
-        case "tTXt":
-            print(f" {image_data["chunks"][key]["data"]["key"]}: {image_data["chunks"][key]["data"]["value"]}")
+        case "zTXt":
+            print(f" '{image_data["chunks"][key]["data"]["key"]}': '{image_data["chunks"][key]["data"]["value"]}'")
             print(f" Compression method: {image_data["chunks"][key]["data"]["compression_method"]}")
 
         case "tIME":

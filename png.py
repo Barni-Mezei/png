@@ -5,7 +5,8 @@ TODO:
 - generate PNG from array of strings (packed image format, palette based)
 - generate PNG from array of RGBA colors (truecolor + alpha)
 
-- make it  apython module, with a single class
+- paeth filter (4)
+- handle multiple IDAT chunks
 
 Resources:
 https://www.nayuki.io/page/png-file-chunk-inspector
@@ -195,6 +196,15 @@ class PNG:
         pass
 
 
+    def _paeth_predictor(self, a, b, c) -> float:
+        p = a + b - c
+        pa = abs(p - a)
+        pb = abs(p - b)
+        pc = abs(p - c)
+
+        if pa <= pb and pa <= pc: return a
+        if pb <= pc: return b
+        return c
 
     def _read_image_data(self) -> tuple:
         """
@@ -275,7 +285,7 @@ class PNG:
                     if self.log_level > 0: print(out["chunks"]["IHDR"]["data"])
 
                 case "IDAT":
-                    chunk_data_bytes = zlib.decompress( out["chunks"]["IDAT"]["data_bytes"], wbits=32)
+                    chunk_data_bytes = zlib.decompress( out["chunks"]["IDAT"]["data_bytes"])
 
                     out["chunks"]["IDAT"]["data"] = {
                         "pre_matrix": [], # Raw matrix of colors or palette indexes
@@ -321,12 +331,20 @@ class PNG:
                     for y, scanline in enumerate(out["chunks"]["IDAT"]["data"]["matrix"]):
                         filter_type = out["chunks"]["IDAT"]["data"]["filter"][y]
 
+                        """
+                        c b
+                        a x
+                        Where X is the current pixel
+                        """
+
                         match filter_type:
                             case 0:
+                                """ Recon(x) = Filt(x) """
                                 # No filter
                                 pass
 
                             case 1:
+                                """ Recon(x) = Filt(x) + Recon(a) """
                                 # Sub filter
                                 for x, pixel in enumerate(scanline):
                                     pixel_value = pixel
@@ -334,10 +352,12 @@ class PNG:
                                     if x > 0:
                                         for channel_index, channel in enumerate(pixel):
                                             pixel_value[channel_index] += scanline[x - 1][channel_index]
+                                            pixel_value[channel_index] = pixel_value[channel_index] % 256
 
                                     out["chunks"]["IDAT"]["data"]["matrix"][y][x] = pixel_value
 
                             case 2:
+                                """ Recon(x) = Filt(x) + Recon(b) """
                                 # Up filter
                                 for x, pixel in enumerate(scanline):
                                     pixel_value = pixel
@@ -345,9 +365,42 @@ class PNG:
                                     if y > 0:
                                         for channel_index, channel in enumerate(pixel):
                                             pixel_value[channel_index] += out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x][channel_index]
+                                            pixel_value[channel_index] = pixel_value[channel_index] % 256
+
+                                    out["chunks"]["IDAT"]["data"]["matrix"][y][x] = pixel_value
+                            
+                            case 3:
+                                # Average filter
+                                """ Recon(x) = Filt(x) + floor((Recon(a) + Recon(b)) / 2) """
+                                for x, pixel in enumerate(scanline):
+                                    pixel_value = pixel
+
+                                    if x > 0 and y > 0:
+                                        for channel_index, channel in enumerate(pixel):
+                                            top = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x][channel_index]
+                                            left = out["chunks"]["IDAT"]["data"]["matrix"][y][x - 1][channel_index]
+                                            avg = int((left + top) / 2)
+                                            pixel_value[channel_index] += avg
+                                            pixel_value[channel_index] = pixel_value[channel_index] % 256
 
                                     out["chunks"]["IDAT"]["data"]["matrix"][y][x] = pixel_value
 
+                            case 4:
+                                # Paeth filter
+                                """ Recon(x) = Filt(x) + PaethPredictor(Recon(a), Recon(b), Recon(c)) """
+                                for x, pixel in enumerate(scanline):
+                                    pixel_value = pixel
+
+                                    if x > 0 and y > 0:
+                                        for channel_index, channel in enumerate(pixel):
+                                            top_left = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x - 1][channel_index]
+                                            top = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x][channel_index]
+                                            left = out["chunks"]["IDAT"]["data"]["matrix"][y][x - 1][channel_index]
+                                            pixel_value[channel_index] += self._paeth_predictor(left, top, top_left)
+                                            pixel_value[channel_index] = pixel_value[channel_index] % 256
+                                        #pixel_value = [0, 0, 0, 255]
+
+                                    out["chunks"]["IDAT"]["data"]["matrix"][y][x] = pixel_value
 
                 case "tEXT":
                     chunk_data_bytes = out["chunks"]["tEXT"]["data_bytes"]
@@ -373,17 +426,17 @@ class PNG:
                     chunk_data_bytes = out["chunks"]["zTXt"]["data_bytes"]
 
                     out["chunks"]["zTXt"]["data"] = {
-                        "key": "",
-                        "value": "",
+                        "key": bytearray(),
+                        "value": bytearray(),
                     }
 
                     destination = "key"
 
                     while len(chunk_data_bytes) > 0:
-                        character = int.from_bytes(chunk_data_bytes[:1])
+                        character = chunk_data_bytes[:1]
                         chunk_data_bytes = chunk_data_bytes[1:]
                         
-                        if character == 0:
+                        if character == b"\x00":
                             destination = "value"
                         
                             compression_method = int.from_bytes(chunk_data_bytes[:1])
@@ -395,10 +448,9 @@ class PNG:
 
                         out["chunks"]["zTXt"]["data"][destination] += character
 
-                    # Decode value
-                    out["chunks"]["zTXt"]["data"][destination] += character
-
-
+                    # Decode key and value
+                    out["chunks"]["zTXt"]["data"]["key"] = out["chunks"]["zTXt"]["data"]["key"].decode('ISO-8859-1')
+                    #out["chunks"]["zTXt"]["data"]["value"] = zlib.decompress(out["chunks"]["zTXt"]["data"]["value"], wbits=8).decode('ISO-8859-1')
 
                 case "tIME":
                     chunk_data_bytes = out["chunks"]["tIME"]["data_bytes"]
