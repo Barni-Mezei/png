@@ -28,7 +28,7 @@ PNG_COLOR_PALETTE = 1 << 1 # Plette mode
 PNG_INPUT_ARRAY = 1 << 2 # Input is a 1d array
 
 class PNG:
-    log_level : int = 1
+    log_level : int = 0
 
     flags : int
     image_data : list
@@ -100,6 +100,9 @@ class PNG:
             with open(image_data, "rb") as f:
                 self._file_data = f.read()
 
+            # Get image metadata
+            self.image_meta, _ = self._read_image_data()
+
         # Write mode
         else:
             # Set default values if input is in matrix form
@@ -162,7 +165,7 @@ class PNG:
 
     def get_matrix(self) -> list:
         """
-        ### READ MODE
+        ### READ & WRITE MODE
 
         **Description:**
 
@@ -172,10 +175,11 @@ class PNG:
         if self._was_modified:
             return self.image_data
         else:
-            self.get_meta()
-        if not self._file_data: self._file_data = self._generate_image()
+            if not self._file_data: self._file_data = self._generate_image()
+    
+            _, raw = self._read_image_data()
 
-        return self._file_data
+            return raw["chunks"]["IDAT"]["data"]["matrix"]
 
 
     def get_meta(self) -> dict:
@@ -189,10 +193,7 @@ class PNG:
         - height: int
         """
 
-        return {
-            "width": self.image_width,
-            "height": self.image_height,
-        }
+        return self.image_meta
 
     def shader(self, callback) -> None:
         """
@@ -232,7 +233,13 @@ class PNG:
         """
         **Description:**
 
-        Reads the image dtaa from self._file_data and parses it, retrieving IHDR metadata and color data
+        Reads the image data from self._file_data and parses it, retrieving IHDR metadata palette data and text data.
+
+        **Returns:**
+
+        This function returns with 2 values, as a tuple.
+        - The first one is a nicely formatted dictionary holding only the necessary data
+        - The second value is a dictionary holding every data read from the image
 
         """
 
@@ -321,6 +328,32 @@ class PNG:
                         out["chunks"]["PLTE"]["data"].append([r, g, b, 255])
 
                     if self.log_level > 1: print(out["chunks"]["PLTE"]["data"])
+
+                case "tRNS":
+                    chunk_data_bytes = out["chunks"]["tRNS"]["data_bytes"]
+
+                    out["chunks"]["tRNS"]["data"] = []
+
+                    match out["chunks"]["IHDR"]["data"]["color_type"]:
+                        case PNG._color_type_grayscale:
+                            # Image global alpha
+                            out["chunks"]["tRNS"]["data"].append( int.from_bytes(chunk_data_bytes[data_offset+1:data_offset+2]) )
+
+                        case PNG._color_type_truecolor:
+                            # Image global alpha per channel
+                            out["chunks"]["tRNS"]["data"].append( int.from_bytes(chunk_data_bytes[data_offset+1:data_offset+2]) )
+
+                        case PNG._color_type_indexed:
+                            for i, byte in enumerate(chunk_data_bytes):
+                                a = byte
+
+                                # Set alpha values in the palette                                
+                                out["chunks"]["PLTE"]["data"][i][3] = a
+                                
+                                # Add to chunk data
+                                out["chunks"]["tRNS"]["data"].append( a )
+
+                    if self.log_level > 1: print(out["chunks"]["tRNS"]["data"])
 
                 case "IDAT":
                     chunk_data_bytes = zlib.decompress( out["chunks"]["IDAT"]["data_bytes"])
@@ -503,7 +536,38 @@ class PNG:
                 case "IEND":
                     out["chunks"]["IEND"]["data"] = None
 
-        return out
+        # Get necessary data from the chunks, and format it nicely
+        # Default values
+        formatted = {
+            "width": 0,
+            "height": 0,
+            "bit_depth": 8,
+            "color_type": 6,
+            "interlace_method": 0,
+            "palette": [],
+            "text": {},
+            "time": {},
+        }
+
+        # Set values if corresponding chunk was found
+        if "IHDR" in out["chunks"]:
+            formatted["width"] = out["chunks"]["IHDR"]["data"]["width"]
+            formatted["height"] = out["chunks"]["IHDR"]["data"]["height"]
+            formatted["bit_depth"] = out["chunks"]["IHDR"]["data"]["bit_depth"]
+            formatted["color_type"] = out["chunks"]["IHDR"]["data"]["color_type"]
+            formatted["interlace_method"] = out["chunks"]["IHDR"]["data"]["interlace_method"]
+
+        if "tIME" in out["chunks"]:
+            formatted["time"] = out["chunks"]["tIME"]["data"]
+
+        if "PLTE" in out["chunks"]:
+            formatted["palette"] = out["chunks"]["PLTE"]["data"]
+
+        if "tEXt" in out["chunks"]:
+            formatted["text"] = out["chunks"]["tEXt"]["data"]
+            formatted["text"]["value"] = out["chunks"]["tEXt"]["data"]["key"] + ": " + out["chunks"]["tEXt"]["data"]["value"]
+
+        return formatted, out
 
 
     def _generate_crc(self, data : bytearray) -> int:
@@ -527,14 +591,17 @@ class PNG:
         out = bytearray()
 
         chunk_data = {
-            "width": self.image_width,
-            "height": self.image_height,
+            "width": self.image_meta["width"],
+            "height": self.image_meta["height"],
             "bit_depth": 8, # 8 bit color depth
             "color_type": 6, # 3: Palette, 6: True color with alpha
             "compression_method": 0, # Deflate compression
             "filter_method": 0, # No filter
             "interlace_method": 0, # No interlacing
         }
+
+        if self.flags & PNG_COLOR_PALETTE:
+            chunk_data["color_type"] = 3
 
         chunk_data_bytes = bytearray([0x49, 0x48, 0x44, 0x52]) # Chunk name IHDR
         chunk_data_bytes += bytearray(chunk_data['width'].to_bytes(4, 'big')) 
@@ -555,8 +622,51 @@ class PNG:
 
         return out
 
+    def _generate_chunk_PLTE(self, palette : list) -> bytearray:
+        if self.log_level > 0: print("Generating PLTE chunk...")
+
+        out = bytearray()
+
+        chunk_data_bytes = bytearray([0x50, 0x4c, 0x54, 0x45]) # Chunk name PLTE
+
+        for color in palette:
+            chunk_data_bytes += bytearray(color[0].to_bytes(1, 'big'))
+            chunk_data_bytes += bytearray(color[1].to_bytes(1, 'big'))
+            chunk_data_bytes += bytearray(color[2].to_bytes(1, 'big'))
+
+        chunk_crc = self._generate_crc(chunk_data_bytes)
+
+        chunk_size = len(chunk_data_bytes) - 4 # Not counting the chunk name (4 bytes)
+
+        out += chunk_size.to_bytes(4, 'big')
+        out += chunk_data_bytes
+        out += chunk_crc.to_bytes(4, 'big')
+
+        return out
+
+    def _generate_chunk_tRNS(self, palette : list) -> bytearray:
+        if self.log_level > 0: print("Generating tRNS chunk...")
+
+        out = bytearray()
+
+        chunk_data_bytes = bytearray([0x74, 0x52, 0x4e, 0x53]) # Chunk name PLTE
+
+        if self.flags & PNG_COLOR_PALETTE:
+            for color in palette:
+                chunk_data_bytes += bytearray(color[3].to_bytes(1, 'big'))
+
+        chunk_crc = self._generate_crc(chunk_data_bytes)
+
+        chunk_size = len(chunk_data_bytes) - 4 # Not counting the chunk name (4 bytes)
+
+        out += chunk_size.to_bytes(4, 'big')
+        out += chunk_data_bytes
+        out += chunk_crc.to_bytes(4, 'big')
+
+        return out
+
     def _generate_chunk_IDAT_rgb(self, rgb_2d_matrix : list) -> bytearray:
-        if self.log_level > 0: print("Generating IDAT chunk...")
+        if self.log_level > 0: print("Generating (rgba) IDAT chunk...")
 
         out = bytearray()
 
@@ -585,6 +695,34 @@ class PNG:
 
         return out
 
+    def _generate_chunk_IDAT_palette(self, palette_2d_matrix : list) -> bytearray:
+        if self.log_level > 0: print("Generating (palette) IDAT chunk...")
+
+        out = bytearray()
+
+        chunk_data_bytes = bytearray([0x49, 0x44, 0x41, 0x54]) # Chunk name IDAT
+
+        pixel_data = bytearray()
+
+        for line in palette_2d_matrix:
+            pixel_data += bytearray([0x00]) # Scanline filtering method
+        
+            for index in line:
+                pixel_data += bytearray(index.to_bytes(1, 'big'))
+
+        chunk_data_bytes += bytearray(zlib.compress(pixel_data))
+
+        chunk_crc = self._generate_crc(chunk_data_bytes)
+
+        chunk_size = len(chunk_data_bytes) - 4 # Not counting the chunk name (4 bytes)
+
+        out += chunk_size.to_bytes(4, 'big')
+        out += chunk_data_bytes
+        out += chunk_crc.to_bytes(4, 'big')
+
+        return out
+
+
     def _generate_chunk_IEND(self) -> bytearray:
         if self.log_level > 0: print("Generating IEND chunk...")
 
@@ -602,14 +740,29 @@ class PNG:
 
         return out
 
-    def _generate_image(self) -> None:
+    def _generate_image(self) -> bytearray:
+        """
+        ** Description: **
+
+        Generates a PNG image, and returns with a bytearray
+        """
+
         if self.log_level > 0: print("Stated generation...")
 
         # The magic header for every PNG
-        self._file_data = bytearray([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+        out = bytearray([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
 
-        self._file_data += self._generate_chunk_IHDR()
-        self._file_data += self._generate_chunk_IDAT_rgb(self.image_data)
-        self._file_data += self._generate_chunk_IEND()
+        out += self._generate_chunk_IHDR()
+
+        if self.flags & PNG_COLOR_PALETTE:
+            out += self._generate_chunk_PLTE(self.palette)
+            out += self._generate_chunk_tRNS(self.palette)
+            out += self._generate_chunk_IDAT_palette(self.image_data)
+        else:
+            out += self._generate_chunk_IDAT_rgb(self.image_data)
+        
+        out += self._generate_chunk_IEND()
 
         if self.log_level > 0: print("End generation...")
+
+        return out
