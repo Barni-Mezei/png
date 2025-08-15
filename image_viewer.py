@@ -12,6 +12,12 @@ args = parser.parse_args()
 
 # Read image data
 image = PNG(args.filename, flags=PNG_READ)
+
+def test_shader(uv, pos, color : tuple) -> tuple:
+    return (255, 0, 0, 255)
+
+image.shader(test_shader)
+
 color_matrix = image.get_matrix()
 image_meta = image.get_meta()
 

@@ -8,10 +8,11 @@ TODO:
 - handle multiple IDAT chunks
 - handle interalcing
 
-- tRNS set palette color alpha values
-
-- convert indexed to rgba matrix
 - zTXt correcly decompress text
+
+
+- shader (write data back to self.image_data)
+
 
 Resources:
 https://www.nayuki.io/page/png-file-chunk-inspector
@@ -214,6 +215,24 @@ class PNG:
             - **Returns:**
             - output_color(touple): (r : int, g : int, b : int, a: int)
         """
+
+
+        if self._was_modified:
+            buffer = []
+
+            for y, scanline in self.image_data:
+                buffer_line = []
+
+                for x, pixel in scanline:
+                    uv_x = 0
+                    uv_y = 0
+                    if x > 0: uv_x = self.image_meta["width"] / x
+                    if y > 0: uv_y = self.image_meta["height"] / y
+
+                    buffer_line.append( callback((uv_x, uv_y), (x, y), pixel) )
+                buffer.append(buffer_line)
+
+            self.image_meta = buffer
 
         self._was_modified = True
 
