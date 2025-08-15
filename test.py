@@ -53,15 +53,36 @@ for key in image_data["chunks"]:
                 print(f" - {index:>3}: ({ansi_code}██{reset_code}) {color}")
 
         case "IDAT":
-            for data_item in image_data["chunks"][key]["data"]["matrix"]:
-                for pixel in data_item:
-                    # IMplement multiplied alpha
-                    a = pixel[3] / 255
-                    pixel = [int(c * a) for c in pixel[0:-1:1]]
-                    ansi_code = f"\033[38;2;{pixel[0]};{pixel[1]};{pixel[2]}m"
+            # for data_item in image_data["chunks"][key]["data"]["matrix"]:
+            #     for pixel in data_item:
+            #         # IMplement multiplied alpha
+            #         a = pixel[3] / 255
+            #         pixel = [int(c * a) for c in pixel[0:-1:1]]
+            #         ansi_code = f"\033[38;2;{pixel[0]};{pixel[1]};{pixel[2]}m"
+            #         reset_code = "\033[0m"
+            #         print(f"{ansi_code}██", end=reset_code)
+            #         #print(f"{ansi_code}##", end=reset_code)
+            #     print()
+
+            height = len(image_data["chunks"][key]["data"]["matrix"])
+            if height % 2 != 0: height -= 1
+
+            for y in range(0, height, 2):
+                for x in range( len(image_data["chunks"][key]["data"]["matrix"][0]) ):
+                    pixel_top = image_data["chunks"][key]["data"]["matrix"][y][x]
+                    pixel_bottom = image_data["chunks"][key]["data"]["matrix"][y + 1][x]
+
+                    # Multiplied alpha
+                    a_top = pixel_top[3] / 255
+                    pixel_top = [int(c * a_top) for c in pixel_top[0:-1:1]]
+                    top_ansi_code = f"\033[48;2;{pixel_top[0]};{pixel_top[1]};{pixel_top[2]}m"
+                    
+                    a_bottom = pixel_bottom[3] / 255
+                    pixel_bottom = [int(c * a_bottom) for c in pixel_bottom[0:-1:1]]
+                    bottom_ansi_code = f"\033[38;2;{pixel_bottom[0]};{pixel_bottom[1]};{pixel_bottom[2]}m"
+                    
                     reset_code = "\033[0m"
-                    print(f"{ansi_code}██", end=reset_code)
-                    #print(f"{ansi_code}##", end=reset_code)
+                    print(f"{top_ansi_code}{bottom_ansi_code}▄", end=reset_code)
                 print()
 
             # Count filers

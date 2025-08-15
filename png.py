@@ -374,8 +374,8 @@ class PNG:
                             b = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x]
                             c = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x - 1]
 
-                            left_edge = x > 0
-                            top_edge = y > 0
+                            if x == 0: a, c = [0, 0, 0, 0], [0, 0, 0, 0]
+                            if y == 0: b = [0, 0, 0, 0]
 
                             pixel_value = pixel
 
@@ -391,25 +391,25 @@ class PNG:
                                         # Sub filter
                                         """ Recon(x) = Filt(x) + Recon(a) """
 
-                                        if left_edge: pixel_value[channel] += a[channel]
+                                        pixel_value[channel] += a[channel]
 
                                     case 2:
                                         # Up filter
                                         """ Recon(x) = Filt(x) + Recon(b) """
 
-                                        if top_edge: pixel_value[channel] += b[channel]
+                                        pixel_value[channel] += b[channel]
 
                                     case 3:
                                         # Average filter
                                         """ Recon(x) = Filt(x) + floor((Recon(a) + Recon(b)) / 2) """
 
-                                        if left_edge and top_edge: pixel_value[channel] += int((a[channel] + b[channel]) / 2)
+                                        pixel_value[channel] += int((a[channel] + b[channel]) / 2)
 
                                     case 4:
                                         # Paeth filter
                                         """ Recon(x) = Filt(x) + PaethPredictor(Recon(a), Recon(b), Recon(c)) """
 
-                                        if left_edge and top_edge: pixel_value[channel] += self._paeth_predictor(a[channel], b[channel], c[channel])
+                                        pixel_value[channel] += self._paeth_predictor(a[channel], b[channel], c[channel])
 
                             # Create RGBA format
                             match out["chunks"]["IHDR"]["data"]["color_type"]:
