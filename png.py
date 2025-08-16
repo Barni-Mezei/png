@@ -17,6 +17,7 @@ https://www.w3.org/TR/png-3/
 """
 
 import zlib
+import os
 import time
 
 # Flags
@@ -192,7 +193,7 @@ class PNG:
 
         return self.image_meta
 
-    def shader(self, callback, *args) -> None:
+    def shader(self, callback : callable, shader_args : list = [], output : str|None = None) -> any:
         """
         ### READ & WRITE MODE
 
@@ -211,8 +212,15 @@ class PNG:
             - **Returns:**
             - output_color(touple): (r : int, g : int, b : int, a: int)
             - *args: THe passed arguments to the shader
-        - *args: Any additional arguments that will be passed to the callback function
+        - output(str):
+            - None: The funcion will output nothing
+            - yield: The function will yield back progress, after each completed scanline, as the following tuple (completed, total, percent)
+            - print: The function wil print out the progress like so: Processing... {completed} / {total} ({percent}%) and prints a carridge return (\\r) after it.
+            - bar: The function will print a progress bar after each scanline. The progress bar's width is the whole screen, and it is 1 character high
+        - shader_args(list): Any additional arguments that will be passed to the callback function, in an unpacked form
         """
+
+        print("Shader out", output, "args", *shader_args)
 
         buffer = []
 
@@ -223,21 +231,42 @@ class PNG:
                 uv_x = x / self.image_meta["width"]
                 uv_y = y / self.image_meta["height"]
 
-                color_out = callback((uv_x, uv_y), (x, y), pixel, *args)
+                try:
+                    color_out = callback((uv_x, uv_y), (x, y), pixel, *shader_args)
+                except Exception as e:
+                    raise e
 
                 for i, channel in enumerate(color_out):
                     color_out[i] =  int(channel) % 256
 
-                buffer_line.append( color_out )
+                buffer_line.append(color_out)
+
+            percent = int((y / len(self.image_data)) * 100)
+
+            match output:
+
+                case "print":
+                    print(f"Processing {y:>04}/{len(self.image_data):>04} ({percent}%)", end="\r")
+                #case "bar":
+                #    w, _ = os.get_terminal_size()
+                #    print(f"{y:>04}/{len(self.image_data):>04}|{"#"*5}{"."*5}|{percent:>3}%)", end="\r")
+
+            if output == "yield":
+                yield (y, len(self.image_data), percent)
+
+
             buffer.append(buffer_line)
+
+            if not output is None and output != "yield":
+                print()
 
         self.image_data = buffer
 
         self._was_modified = True
 
-        pass
+        return True
 
-    def print(self, step : int = 1) -> None:
+    def print(self, step : int|None = None) -> None:
         """
         **Description:**
 
@@ -246,11 +275,15 @@ class PNG:
         If the image height is odd, then a single black line will be preinted at the bottom (This is not part of the image data)
 
         **Parameters:**
-        - step(int) The number of steps to take, to reach the next pixel. For example, when set to 2,
+        - step(int) The number of steps to take, to reach the next pixel. **MUST BE >= 1** For example, when set to 2,
         then a single pixel will be skipped over, and the image will be half as big on both axis.
-
+        If set to None (default) then the image wil be scaled automatically to fully fit inside the terminal
         """
         
+        if step is None or step < 1:
+            w, _ = os.get_terminal_size()
+            step = int((self.image_meta["width"] / w) + 1) if self.image_meta["width"] > w else 1
+
         buffer = self.image_data
 
         # Correct image height

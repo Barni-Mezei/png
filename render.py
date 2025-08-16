@@ -17,6 +17,7 @@ parser = argparse.ArgumentParser()
 
 # Add the filename argument
 parser.add_argument('filename', type=str, help='File to open and manipulate')
+parser.add_argument('filename2', type=str, help='2nd file to open and manipulate')
 
 # Parse the arguments
 args = parser.parse_args()
@@ -123,7 +124,7 @@ def blur_shader(uv, pos, color : tuple, blur_size) -> tuple:
 
     return out_color
 
-def alpha_checkerboard_shader(uv, pos, color : tuple) -> tuple:
+def alpha_checkerboard_shader(uv, pos, color : tuple, patter_brightness : float = 1) -> tuple:
     GRID_SIZE = 16
 
     alpha = color[3] / 255
@@ -132,7 +133,7 @@ def alpha_checkerboard_shader(uv, pos, color : tuple) -> tuple:
     rows = 1 if ((pos[1]) % (GRID_SIZE * 2)) >= GRID_SIZE else 0
 
     grid = ((columns + rows) % 2) / 2 + 0.25
-    grid *= 255
+    grid = clamp(grid * patter_brightness * 255, 0, 255)
 
     out_color = [
         mix(grid, color[0], alpha),
@@ -227,6 +228,43 @@ def band_shader(uv, pos, color : tuple, number_of_bands : int) -> tuple:
         band(color[3], number_of_bands),
     ]
 
+def band_diff_shader(uv, pos, color : tuple) -> tuple:
+    return [
+        color[0] - band(color[0], 8),
+        color[1] - band(color[1], 8),
+        color[2] - band(color[2], 8),
+        color[3] - band(color[3], 8),
+    ]
+
+def mask_shader(uv, pos, color : tuple, mask_matrix : list, mask_meta : dict) -> tuple:
+    """
+    **Description:**
+
+    Multiplies the original image with the mask
+    
+    ** Parameters:**
+    - mask_matrix(list) The mask color matrix (will be repeated)
+    - mask_meta(dict) The metadata from the mask image (needed for mask size)
+    """
+
+    mask_pos_x = wrap(pos[0], 0, mask_meta["width"])
+    mask_pos_y = wrap(pos[1], 0, mask_meta["height"])
+
+    mask_brightness = sum(mask_matrix[mask_pos_y][mask_pos_x][0:3]) / 3
+    mask_brightness *= mask_matrix[mask_pos_y][mask_pos_x][3] / 255
+    mask_brightness /= 255 # Normalise to 0 - 1
+
+    # Move range to 0.25 - 1
+    mask_brightness *= 0.75
+    mask_brightness += 0.25
+
+    return [
+        clamp(color[0] * mask_brightness, 0, 255),
+        clamp(color[1] * mask_brightness, 0, 255),
+        clamp(color[2] * mask_brightness, 0, 255),
+        color[3],
+    ]
+
 
 # Prepare folder
 if os.path.exists("renders/"):
@@ -235,38 +273,61 @@ if os.path.exists("renders/"):
     # Re-create the folder
     os.makedirs("renders/")
 
-
-for i in range(360):
+for i in range(1):
     # Read image data
-    #print(f"Reading ({i})...")
+    print("Reading...")
     image = PNG(args.filename, flags=PNG_READ)
 
-    image_meta = image.get_meta()
-
     # Apply shader to the image
-    #print("Grayscale...")
-    #image.shader(grayscale_shader)
     #print("Alpha monchrome...")
     #image.shader(alpha_monochrome_shader)
     #print("Alpha edge...")
     #image.shader(alpha_edge_shader)
     #print("Blur...")
     #color_matrix = image.get_matrix()
-    #image.shader(blur_shader, 3)
+    #image.shader(blur_shader, [3])
     #print("UV...")
     #image.shader(uv_shader)
     #print("UV warp...")
-    color_matrix = image.get_matrix()
-    image.shader(uv_whirlpool_shader, i * 0.05)
+    #color_matrix = image.get_matrix()
+    #image.shader(uv_whirlpool_shader, [i * 0.05])
     #print("Band...")
-    #image.shader(band_shader, 2**0)
+    #image.shader(band_shader, [2**0])
     #image.shader(alpha_monochrome_shader)
     #print("Alpha checkerboard...")
-    #image.shader(alpha_checkerboard_shader)
+
+    image.print()
+
+    image_meta = image.get_meta()
+    color_matrix = image.get_matrix()
+    print("Blurring...")
+    
+    #for current, total, percent in image.shader(blur_shader, [5], output = "yield"):
+    #    print(f"Processing {current}/{total} ({percent}%)", end="\r")
+    #print()
+    
+    image.shader(blur_shader, [5], output = "print")
+    image.shader(alpha_monochrome_shader)
+    #image.shader(alpha_checkerboard_shader, [0.5])
+
+    exit()
+
+    color_mask = image.get_matrix()
+    mask_meta = image.get_meta()
 
     w, _ = os.get_terminal_size()
     scale = int((image_meta["width"] / w) + 1) if image_meta["width"] > w else 1
-
     image.print(scale)
 
-    image.write(f"renders/fish_{i:>03}.png")
+    # Load second image
+    image = PNG(args.filename2, flags=PNG_READ)
+
+    image.shader(mask_shader, color_mask, mask_meta)
+
+    image_meta = image.get_meta()
+
+    w, _ = os.get_terminal_size()
+    scale = int((image_meta["width"] / w) + 1) if image_meta["width"] > w else 1
+    image.print(scale)
+
+    image.write(f"renders/frame_{i:>03}.png")
