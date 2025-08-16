@@ -29,7 +29,7 @@ PNG_COLOR_PALETTE = 1 << 1 # Plette mode
 PNG_INPUT_ARRAY = 1 << 2 # Input is a 1d array
 
 class PNG:
-    log_level : int = 0
+    log_level : int = 1
 
     flags : int
     image_data : list
@@ -102,7 +102,8 @@ class PNG:
                 self._file_data = f.read()
 
             # Get image metadata
-            self.image_meta, _ = self._read_image_data()
+            self.image_meta, raw = self._read_image_data()
+            self.image_data = raw["chunks"]["IDAT"]["data"]["matrix"]
 
         # Write mode
         else:
@@ -173,14 +174,14 @@ class PNG:
         Returns with a 2d matrix of RGBA colors, read from the image.
         """
 
-        if self._was_modified:
-            return self.image_data
-        else:
-            if not self._file_data: self._file_data = self._generate_image()
+        return self.image_data
+        #if self._was_modified:
+        #else:
+            #if not self._file_data: self._file_data = self._generate_image()
     
-            _, raw = self._read_image_data()
+            #_, raw = self._read_image_data()
 
-            return raw["chunks"]["IDAT"]["data"]["matrix"]
+        #    return raw["chunks"]["IDAT"]["data"]["matrix"]
 
 
     def get_meta(self) -> dict:
@@ -196,7 +197,7 @@ class PNG:
 
         return self.image_meta
 
-    def shader(self, callback) -> None:
+    def shader(self, callback, *args) -> None:
         """
         ### READ & WRITE MODE
 
@@ -214,31 +215,64 @@ class PNG:
             - color(tuple): (r : int, g : int, b : int, a : int) The color of the current pixel, as an RGBA tuple. Color values are integers, from 0 to 255 inclusive.
             - **Returns:**
             - output_color(touple): (r : int, g : int, b : int, a: int)
+            - *args: THe passed arguments to the shader
+        - *args: Any additional arguments that will be passed to the callback function
         """
 
+        buffer = []
 
-        if self._was_modified:
-            buffer = []
+        for y, scanline in enumerate(self.image_data):
+            buffer_line = []
 
-            for y, scanline in self.image_data:
-                buffer_line = []
+            for x, pixel in enumerate(scanline):
+                uv_x = 0
+                uv_y = 0
+                if x > 0: uv_x = x / self.image_meta["width"]
+                if y > 0: uv_y = y / self.image_meta["height"]
 
-                for x, pixel in scanline:
-                    uv_x = 0
-                    uv_y = 0
-                    if x > 0: uv_x = self.image_meta["width"] / x
-                    if y > 0: uv_y = self.image_meta["height"] / y
+                color_out = callback((uv_x, uv_y), (x, y), pixel, args)
 
-                    buffer_line.append( callback((uv_x, uv_y), (x, y), pixel) )
-                buffer.append(buffer_line)
+                for i, channel in enumerate(color_out):
+                    color_out[i] =  int(channel) % 256
 
-            self.image_meta = buffer
+                buffer_line.append( color_out )
+            buffer.append(buffer_line)
+
+        self.image_data = buffer
 
         self._was_modified = True
 
         pass
 
-    def _paeth_predictor(self, a, b, c) -> float:
+    def print(self, step = 1) -> None:
+        buffer = self.image_data
+
+        # Correct image height
+        height = self.image_meta["height"]
+        if height % 2 != 0:
+            # Add an additional black line at the bottom of the image to display the last odd row
+            buffer.append([[0, 0, 0, 0] for _ in range(self.image_meta["width"])])
+
+        # Draw pixels as characters
+        for y in range(0, height, 2 * step):
+            for x in range( 0, self.image_meta["width"], step ):
+                pixel_top = buffer[y][x]
+                pixel_bottom = buffer[y + 1][x]
+
+                # Multiplied alpha
+                a_top = pixel_top[3] / 255
+                pixel_top = [int(c * a_top) for c in pixel_top[0:-1:1]]
+                top_ansi_code = f"\033[48;2;{pixel_top[0]};{pixel_top[1]};{pixel_top[2]}m"
+                
+                a_bottom = pixel_bottom[3] / 255
+                pixel_bottom = [int(c * a_bottom) for c in pixel_bottom[0:-1:1]]
+                bottom_ansi_code = f"\033[38;2;{pixel_bottom[0]};{pixel_bottom[1]};{pixel_bottom[2]}m"
+                
+                reset_code = "\033[0m"
+                print(f"{top_ansi_code}{bottom_ansi_code}▄", end=reset_code)
+            print()
+
+    def _paeth_predictor_o(self, a, b, c) -> float:
         p = a + b - c
         pa = abs(p - a)
         pb = abs(p - b)
@@ -247,6 +281,17 @@ class PNG:
         if pa <= pb and pa <= pc: return a
         if pb <= pc: return b
         return c
+
+    def _paeth_predictor(self, a : int, b : int, c : int) -> float:
+        p = a + b - c
+        pa = abs(p - a)
+        pb = abs(p - b)
+        pc = abs(p - c)
+
+        if pa <= pb and pa <= pc: return a
+        if pb <= pc: return b
+        return c
+
 
     def _read_image_data(self) -> tuple:
         """
@@ -411,28 +456,36 @@ class PNG:
 
                     if self.log_level > 0: print(f"\n")
 
+                    start_time = time.time()
+
                     # Process filters
                     for y, scanline in enumerate(out["chunks"]["IDAT"]["data"]["matrix"]):
                         filter_type = out["chunks"]["IDAT"]["data"]["filter"][y]
 
-                        for x, pixel in enumerate(scanline):
+                        if self.log_level > 0: print(f"Processing filter ({filter_type}): {y+1}/{out["chunks"]["IHDR"]["data"]["height"]}", end="\r")
+
+                        for x in range(len(scanline)):
                             """
                             c b
                             a x
                             Where X is the current pixel
                             """
 
-                            a = out["chunks"]["IDAT"]["data"]["matrix"][y][x - 1]
-                            b = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x]
-                            c = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x - 1]
+                            if x == 0:
+                                a, c = [0, 0, 0, 0], [0, 0, 0, 0]
+                            else:
+                                a = out["chunks"]["IDAT"]["data"]["matrix"][y][x - 1]
+                                c = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x - 1]
+                            
+                            if y == 0:
+                                b = [0, 0, 0, 0]
+                            else:
+                                b = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x]
 
-                            if x == 0: a, c = [0, 0, 0, 0], [0, 0, 0, 0]
-                            if y == 0: b = [0, 0, 0, 0]
-
-                            pixel_value = pixel
+                            pixel_value = scanline[x]
 
                             # Iterate over each channel in the pixel and apply the filter
-                            for channel, _ in enumerate(pixel):
+                            for channel in range(len(scanline[x])):
                                 match filter_type:
                                     case 0:
                                         # No filter
@@ -480,6 +533,9 @@ class PNG:
 
                             out["chunks"]["IDAT"]["data"]["matrix"][y][x] = [c % 256 for c in pixel_value]
 
+                    end_time = time.time()
+
+                    if self.log_level > 0: print(f"\n(Took: {end_time - start_time}s)")
 
                 case "tEXt":
                     chunk_data_bytes = out["chunks"]["tEXt"]["data_bytes"]
