@@ -1,18 +1,14 @@
 """
 TODO:
-- generate PNG from 2d array (rotated) of RGBA colors (truecolor + alpha)
-- generate PNG from 2d array (rotated) color indexes (palette based)
-- generate PNG from array of strings (packed image format, palette based)
 - generate PNG from array of RGBA colors (truecolor + alpha)
+- generate PNG from array of color indexes (palette based)
 
 - handle multiple IDAT chunks
 - handle interalcing
 
 - zTXt correcly decompress text
 
-
-- shader (write data back to self.image_data)
-
+- extract palette from any image
 
 Resources:
 https://www.nayuki.io/page/png-file-chunk-inspector
@@ -29,7 +25,7 @@ PNG_COLOR_PALETTE = 1 << 1 # Plette mode
 PNG_INPUT_ARRAY = 1 << 2 # Input is a 1d array
 
 class PNG:
-    log_level : int = 1
+    log_level : int = 0
 
     flags : int
     image_data : list
@@ -103,7 +99,13 @@ class PNG:
 
             # Get image metadata
             self.image_meta, raw = self._read_image_data()
+
+            # Get color matrix
             self.image_data = raw["chunks"]["IDAT"]["data"]["matrix"]
+
+            # Get palette data
+            if "PLTE" in raw["chunks"]:
+                self.palette = raw["chunks"]["PLTE"]["data"]
 
         # Write mode
         else:
@@ -132,7 +134,7 @@ class PNG:
 
         pass
 
-    def write(self, file_name : str) -> None:
+    def write(self, file_name : str, use_palette : bool|None = None) -> None:
         """
         ### READ & WRITE MODE
 
@@ -142,10 +144,11 @@ class PNG:
 
         **Parameters:**
         - file_name(str) The name of the file, where the image data will be written into.
+        - use_palette(bool) decides whenever to use paletted image generation for the ouput image, or regular RGBA
         """
 
-        if not self._file_data:
-            self._file_data = self._generate_image()
+        if not self._file_data or self._was_modified:
+            self._file_data = self._generate_image(use_palette)
 
         f = open(file_name, "wb")
         f.write(self._file_data)
@@ -175,14 +178,6 @@ class PNG:
         """
 
         return self.image_data
-        #if self._was_modified:
-        #else:
-            #if not self._file_data: self._file_data = self._generate_image()
-    
-            #_, raw = self._read_image_data()
-
-        #    return raw["chunks"]["IDAT"]["data"]["matrix"]
-
 
     def get_meta(self) -> dict:
         """
@@ -244,7 +239,20 @@ class PNG:
 
         pass
 
-    def print(self, step = 1) -> None:
+    def print(self, step : int = 1) -> None:
+        """
+        **Description:**
+
+        Prints the image to the console, using the BOTTOM HALF (▄) ascii character and ansi escape sequences,
+        to set the foreground and background color of a character. Each character represents 2 pixels above each other.
+        If the image height is odd, then a single black line will be preinted at the bottom (This is not part of the image data)
+
+        **Parameters:**
+        - step(int) The number of steps to take, to reach the next pixel. For example, when set to 2,
+        then a single pixel will be skipped over, and the image will be half as big on both axis.
+
+        """
+        
         buffer = self.image_data
 
         # Correct image height
@@ -785,21 +793,28 @@ class PNG:
 
         return out
 
-    def _generate_image(self) -> bytearray:
+    def _generate_image(self, use_palette : bool|None = None) -> bytearray:
         """
         ** Description: **
 
         Generates a PNG image, and returns with a bytearray
+
+        **Parameters:**
+
+        - use_palette(bool) Decides whenever to use paletted image generation or regular RGBA
         """
 
         if self.log_level > 0: print("Stated generation...")
+
+        # Set default value for paletted generation
+        if use_palette == None: use_palette = self.flags & PNG_COLOR_PALETTE
 
         # The magic header for every PNG
         out = bytearray([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
 
         out += self._generate_chunk_IHDR()
 
-        if self.flags & PNG_COLOR_PALETTE:
+        if use_palette:
             out += self._generate_chunk_PLTE(self.palette)
             out += self._generate_chunk_tRNS(self.palette)
             out += self._generate_chunk_IDAT_palette(self.image_data)

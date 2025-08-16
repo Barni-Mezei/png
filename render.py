@@ -1,6 +1,7 @@
 import argparse
 from png import *
 import os
+import shutil
 import math
 
 # Create the parser
@@ -90,12 +91,10 @@ def blur_shader(uv, pos, color : tuple, blur_size) -> tuple:
 
     for y in range(BOX_SIZE):
         for x in range(BOX_SIZE):
-            pixel = []
+            pos_x = wrap(pos[0] + x, 0, image_meta["width"])
+            pos_y = wrap(pos[1] + y, 0, image_meta["height"])
 
-            if pos[0] + x == 0 or pos[0] + x >= image_meta["width"]: pixel = color
-            if pos[1] + y == 0 or pos[1] + y >= image_meta["height"]: pixel = color
-
-            if pixel == []: pixel = color_matrix[pos[1] + y][pos[0] + x]
+            pixel = color_matrix[pos_y][pos_x]
 
             for channel in range(4):
                 color_sum[channel] += pixel[channel]
@@ -138,10 +137,10 @@ def uv_shader(uv, pos, color : tuple) -> tuple:
         255
     ]
 
-def uv_warp_shader(uv, pos, color : tuple) -> tuple:
+def uv_warp_shader(uv, pos, color : tuple, offset) -> tuple:
     global color_matrix, image_meta
     
-    uv_x = uv[0] + math.sin(pos[0] * math.pi / 180 * 3)
+    uv_x = uv[0] + math.sin((pos[0] + offset) * math.pi / 180 * 3)
     uv_y = uv[1] + math.sin((pos[0] + pos[1]) * math.pi / 180 * 5)
 
     uv_x = uv_x * 5
@@ -163,45 +162,46 @@ def band_shader(uv, pos, color : tuple, number_of_bands : int) -> tuple:
         band(color[3], number_of_bands),
     ]
 
-# Read image data
-print("Reading...")
-image = PNG(args.filename, flags=PNG_READ)
 
-image_meta = image.get_meta()
+# Prepare folder
+if os.path.exists("renders/"):
+    shutil.rmtree("renders/")
+    
+    # Re-create the folder
+    os.makedirs("renders/")
 
-# Apply shader to the image
-#print("Grayscale...")
-#image.shader(grayscale_shader)
-#print("Alpha monchrome...")
-#image.shader(alpha_monochrome_shader)
-#print("Alpha edge...")
-#image.shader(alpha_edge_shader)
-#print("Blur...")
-#color_matrix = image.get_matrix()
-#image.shader(blur_shader, 3)
-#print("UV...")
-#image.shader(uv_shader)
-print("UV warp...")
-color_matrix = image.get_matrix()
-image.shader(uv_warp_shader)
-#print("Band...")
-#image.shader(band_shader, 2**0)
-#image.shader(alpha_monochrome_shader)
-#print("Alpha checkerboard...")
-#image.shader(alpha_checkerboard_shader)
 
-w, _ = os.get_terminal_size()
-scale = int((image_meta["width"] / w) + 1) if image_meta["width"] > w else 1
+for i in range(23):
+    # Read image data
+    #print(f"Reading ({i})...")
+    image = PNG(args.filename, flags=PNG_READ)
 
-print("Print...")
-image.print(scale)
+    image_meta = image.get_meta()
 
-print("Image data")
+    # Apply shader to the image
+    #print("Grayscale...")
+    #image.shader(grayscale_shader)
+    #print("Alpha monchrome...")
+    #image.shader(alpha_monochrome_shader)
+    #print("Alpha edge...")
+    #image.shader(alpha_edge_shader)
+    #print("Blur...")
+    #color_matrix = image.get_matrix()
+    #image.shader(blur_shader, 3)
+    #print("UV...")
+    #image.shader(uv_shader)
+    #print("UV warp...")
+    color_matrix = image.get_matrix()
+    image.shader(blur_shader, 1 + int(math.sin(i * math.pi/180 * 8) * 10))
+    #print("Band...")
+    #image.shader(band_shader, 2**0)
+    #image.shader(alpha_monochrome_shader)
+    #print("Alpha checkerboard...")
+    #image.shader(alpha_checkerboard_shader)
 
-for key in image_meta:
-    if type(image_meta[key]) is dict: continue
-    if type(image_meta[key]) is list: continue
+    w, _ = os.get_terminal_size()
+    scale = int((image_meta["width"] / w) + 1) if image_meta["width"] > w else 1
 
-    print(f" - {key}: {image_meta[key]}")
+    image.print(scale)
 
-image.write("test.png")
+    image.write(f"renders/fish_{i:>03}.png")
