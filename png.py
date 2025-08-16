@@ -220,10 +220,8 @@ class PNG:
             buffer_line = []
 
             for x, pixel in enumerate(scanline):
-                uv_x = 0
-                uv_y = 0
-                if x > 0: uv_x = x / self.image_meta["width"]
-                if y > 0: uv_y = y / self.image_meta["height"]
+                uv_x = x / self.image_meta["width"]
+                uv_y = y / self.image_meta["height"]
 
                 color_out = callback((uv_x, uv_y), (x, y), pixel, *args)
 

@@ -1,14 +1,22 @@
+"""
+
+Resources:
+https://konvertor.vercel.app/#app
+
+"""
+
 import argparse
 from png import *
 import os
 import shutil
 import math
+import random
 
 # Create the parser
 parser = argparse.ArgumentParser()
 
 # Add the filename argument
-parser.add_argument('filename', type=str, help='File to open and show')
+parser.add_argument('filename', type=str, help='File to open and manipulate')
 
 # Parse the arguments
 args = parser.parse_args()
@@ -39,6 +47,16 @@ def wrap(value : float, min : float, max : float) -> float:
     diff = max - min
 
     return min + value % diff
+
+def distance(p1 : tuple, p2 : tuple) -> float:
+    dx = p2[0] - p1[0]
+    dy = p2[1] - p1[1]
+
+    return math.sqrt(dx*dx + dy*dy)
+
+def smoothstep(value : float) -> float:
+    value = max(0, min(1, value))
+    return value*value * (3 - value * 2)
 
 """
 Some sahders
@@ -89,8 +107,8 @@ def blur_shader(uv, pos, color : tuple, blur_size) -> tuple:
 
     color_sum = [0, 0, 0, 0]
 
-    for y in range(BOX_SIZE):
-        for x in range(BOX_SIZE):
+    for y in range(int(-BOX_SIZE / 2), int(BOX_SIZE / 2 + 0.5), 1):
+        for x in range(int(-BOX_SIZE / 2), int(BOX_SIZE / 2 + 0.5), 1):
             pos_x = wrap(pos[0] + x, 0, image_meta["width"])
             pos_y = wrap(pos[1] + y, 0, image_meta["height"])
 
@@ -149,10 +167,57 @@ def uv_warp_shader(uv, pos, color : tuple, offset) -> tuple:
     pos_x = wrap( int(pos[0] + uv_x), 0, image_meta["width"] )
     pos_y = wrap( int(pos[1] + uv_y), 0, image_meta["height"] )
 
-    #if pos_x < 0 or pos_x >= image_meta["width"] or pos_y < 0 or pos_y >= image_meta["height"]:
-    #    return [255, 0, 0, 255]
-    #else:
     return color_matrix[pos_y][pos_x]
+
+def uv_whirlpool_shader(uv, pos, color : tuple, time) -> tuple:
+    global color_matrix, image_meta
+    
+    RADIUS = 0.75
+    RING_AMOUNT = 2
+    DEPTH_AMOUNT = 0.25
+    SPEED = 1
+    CENTER = (0.5 + math.sin(time) * 0.25, 0.5)
+    #CENTER = (0.5, 0.5)
+
+    dist = distance(uv, CENTER)
+
+    if dist < RADIUS:
+        # Calculate angle and new distance
+        #angle = math.atan2(uv[1], uv[0]) + AMOUNT * (RADIUS - dist) * math.cos(time + dist * 10)
+        #newDist = dist * (1.0 - (dist / RADIUS))
+
+        new_dist = (RADIUS - dist) * DEPTH_AMOUNT
+        angle = math.atan2(uv[0], uv[1]) + (RADIUS - dist) * RING_AMOUNT * (RADIUS - dist) - time * SPEED
+
+        # Calculate new UV coordinates
+        uv_x = CENTER[0] + math.cos(angle) * new_dist
+        uv_y = CENTER[1] + math.sin(angle) * new_dist
+
+        # Blend on to the original texture
+        uv_x = mix(uv[0], uv_x, 1 - dist / RADIUS)
+        uv_y = mix(uv[1], uv_y, 1 - dist / RADIUS)
+
+        # return [
+        #     clamp(mix(0, 255, uv_x), 0, 255),
+        #     clamp(mix(0, 255, uv_y), 0, 255),
+        #     0,
+        #     255
+        # ]
+
+        pos_x = wrap( int(uv_x * image_meta["width"]), 0, image_meta["width"] )
+        pos_y = wrap( int(uv_y * image_meta["height"]), 0, image_meta["height"] )
+
+        return color_matrix[pos_y][pos_x]
+
+    # return [
+    #     clamp(mix(0, 255, uv[0]), 0, 255),
+    #     clamp(mix(0, 255, uv[1]), 0, 255),
+    #     0,
+    #     255
+    # ]
+
+    return color
+        
 
 def band_shader(uv, pos, color : tuple, number_of_bands : int) -> tuple:
     return [
@@ -171,7 +236,7 @@ if os.path.exists("renders/"):
     os.makedirs("renders/")
 
 
-for i in range(23):
+for i in range(360):
     # Read image data
     #print(f"Reading ({i})...")
     image = PNG(args.filename, flags=PNG_READ)
@@ -192,7 +257,7 @@ for i in range(23):
     #image.shader(uv_shader)
     #print("UV warp...")
     color_matrix = image.get_matrix()
-    image.shader(blur_shader, 1 + int(math.sin(i * math.pi/180 * 8) * 10))
+    image.shader(uv_whirlpool_shader, i * 0.05)
     #print("Band...")
     #image.shader(band_shader, 2**0)
     #image.shader(alpha_monochrome_shader)
