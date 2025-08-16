@@ -276,7 +276,7 @@ if os.path.exists("renders/"):
 for i in range(1):
     # Read image data
     print("Reading...")
-    image = PNG(args.filename, flags=PNG_READ)
+    image = PNG(args.filename, flags=PNG_READ, )
 
     # Apply shader to the image
     #print("Alpha monchrome...")
@@ -300,34 +300,22 @@ for i in range(1):
 
     image_meta = image.get_meta()
     color_matrix = image.get_matrix()
-    print("Blurring...")
-    
-    #for current, total, percent in image.shader(blur_shader, [5], output = "yield"):
-    #    print(f"Processing {current}/{total} ({percent}%)", end="\r")
-    #print()
-    
-    image.shader(blur_shader, [5], output = "print")
-    image.shader(alpha_monochrome_shader)
-    #image.shader(alpha_checkerboard_shader, [0.5])
-
-    exit()
+    image.shader(blur_shader, [5], output = "bar")
+    image.shader(alpha_monochrome_shader, output = "bar")
 
     color_mask = image.get_matrix()
     mask_meta = image.get_meta()
 
-    w, _ = os.get_terminal_size()
-    scale = int((image_meta["width"] / w) + 1) if image_meta["width"] > w else 1
-    image.print(scale)
+    image.shader(alpha_checkerboard_shader, [0.5], output = "bar")
+
+    image.print()
 
     # Load second image
+    print("Reading...")
     image = PNG(args.filename2, flags=PNG_READ)
 
-    image.shader(mask_shader, color_mask, mask_meta)
+    image.shader(mask_shader, [color_mask, mask_meta], output = "bar")
 
-    image_meta = image.get_meta()
-
-    w, _ = os.get_terminal_size()
-    scale = int((image_meta["width"] / w) + 1) if image_meta["width"] > w else 1
-    image.print(scale)
+    image.print()
 
     image.write(f"renders/frame_{i:>03}.png")

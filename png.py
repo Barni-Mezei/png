@@ -10,6 +10,8 @@ TODO:
 
 - extract palette from any image
 
+- fix bar display length on odd width terminals (0% is 1 character longer)
+
 Resources:
 https://www.nayuki.io/page/png-file-chunk-inspector
 https://www.w3.org/TR/png-3/
@@ -214,13 +216,10 @@ class PNG:
             - *args: THe passed arguments to the shader
         - output(str):
             - None: The funcion will output nothing
-            - yield: The function will yield back progress, after each completed scanline, as the following tuple (completed, total, percent)
             - print: The function wil print out the progress like so: Processing... {completed} / {total} ({percent}%) and prints a carridge return (\\r) after it.
             - bar: The function will print a progress bar after each scanline. The progress bar's width is the whole screen, and it is 1 character high
         - shader_args(list): Any additional arguments that will be passed to the callback function, in an unpacked form
         """
-
-        print("Shader out", output, "args", *shader_args)
 
         buffer = []
 
@@ -241,30 +240,29 @@ class PNG:
 
                 buffer_line.append(color_out)
 
-            percent = int((y / len(self.image_data)) * 100)
+            progress = (y / len(self.image_data))
 
             match output:
-
                 case "print":
-                    print(f"Processing {y:>04}/{len(self.image_data):>04} ({percent}%)", end="\r")
-                #case "bar":
-                #    w, _ = os.get_terminal_size()
-                #    print(f"{y:>04}/{len(self.image_data):>04}|{"#"*5}{"."*5}|{percent:>3}%)", end="\r")
-
-            if output == "yield":
-                yield (y, len(self.image_data), percent)
-
+                    print(f"Processing {y}/{len(self.image_data)} ({int(progress * 100)}%)", end="\r")
+                case "bar":
+                    w, _ = os.get_terminal_size()
+                    w -= 15 # Numbers on the side
+                    progress += 0.001
+                    filled = int(progress * w)
+                    empty = int((1 - progress) * w)
+                    print(f"{y:>4}/{len(self.image_data):>4}|{"#"*filled}{"."*empty}|{int(progress * 100):>3}%", end="\r")
 
             buffer.append(buffer_line)
 
-            if not output is None and output != "yield":
-                print()
+        # Add a new line if printing was done
+        if not output is None: print()
 
+        # Set image data to the modified buffer
         self.image_data = buffer
 
+        # MArk the image as modified
         self._was_modified = True
-
-        return True
 
     def print(self, step : int|None = None) -> None:
         """
