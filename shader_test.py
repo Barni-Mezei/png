@@ -46,18 +46,32 @@ def alpha_edge_shader(uv, pos, color : tuple, *args) -> tuple:
 
     return out_color
 
-def blur_shader(uv, pos, color : tuple, *args) -> tuple:
+def blur_shader(uv, pos, color : tuple, blur_size) -> tuple:
     global color_matrix, image_meta
 
-    if pos[0] == 0 or pos[0] == image_meta["width"] - 1:
-        color = [255, 0, 0, 255]
+    BOX_SIZE = blur_size
 
-    if pos[1] == 0 or pos[1] == image_meta["height"] - 1:
-        color = [0, 255, 255, 255]
+    color_sum = [0, 0, 0, 0]
 
-    return color
+    for y in range(BOX_SIZE):
+        for x in range(BOX_SIZE):
+            pixel = []
 
-def alpha_shader(uv, pos, color : tuple, *args) -> tuple:
+            if pos[0] + x == 0 or pos[0] + x >= image_meta["width"]: pixel = color
+            if pos[1] + y == 0 or pos[1] + y >= image_meta["height"]: pixel = color
+
+            if pixel == []: pixel = color_matrix[pos[1] + y][pos[0] + x]
+
+            for channel in range(4):
+                color_sum[channel] += pixel[channel]
+
+    color_count = BOX_SIZE * BOX_SIZE
+
+    out_color = [c / color_count for c in color_sum]
+
+    return out_color
+
+def alpha_shader(uv, pos, color : tuple) -> tuple:
     GRID_SIZE = 16
 
     alpha = color[3] / 255
@@ -82,19 +96,19 @@ def alpha_shader(uv, pos, color : tuple, *args) -> tuple:
 print("Reading...")
 image = PNG(args.filename, flags=PNG_READ)
 
-color_matrix = image.get_matrix()
 image_meta = image.get_meta()
 
 # Apply shader to the image
 #image.shader(grayscale_shader)
 #print("Alpha monchrome...")
 #image.shader(alpha_monochrome_shader)
-#print("Alpha...")
-#image.shader(alpha_shader)
+print("Alpha...")
+image.shader(alpha_shader)
 #print("Alpha edge...")
 #image.shader(alpha_edge_shader)
 print("Blur...")
-image.shader(blur_shader)
+color_matrix = image.get_matrix()
+image.shader(blur_shader, image_meta["width"])
 
 w, _ = os.get_terminal_size()
 scale = int((image_meta["width"] / w) + 1) if image_meta["width"] > w else 1

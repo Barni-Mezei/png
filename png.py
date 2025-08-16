@@ -230,7 +230,7 @@ class PNG:
                 if x > 0: uv_x = x / self.image_meta["width"]
                 if y > 0: uv_y = y / self.image_meta["height"]
 
-                color_out = callback((uv_x, uv_y), (x, y), pixel, args)
+                color_out = callback((uv_x, uv_y), (x, y), pixel, *args)
 
                 for i, channel in enumerate(color_out):
                     color_out[i] =  int(channel) % 256
@@ -423,8 +423,6 @@ class PNG:
                     chunk_data_bytes = zlib.decompress( out["chunks"]["IDAT"]["data_bytes"])
 
                     out["chunks"]["IDAT"]["data"] = {
-                        "pre_matrix": [], # Raw matrix of colors or palette indexes
-                        "filter": [], # Filter method for ecah scanline
                         "matrix": [], # The completed color matrix, after applying the filter
                     }
 
@@ -436,92 +434,63 @@ class PNG:
 
                         # Save line filter type
                         data_offset = (y*out["chunks"]["IHDR"]["data"]["width"]) * pixel_size + y
-                        out["chunks"]["IDAT"]["data"]["filter"].append( int.from_bytes(chunk_data_bytes[data_offset:data_offset + 1]) )
+                        filter_type = int.from_bytes(chunk_data_bytes[data_offset:data_offset + 1])
 
                         for x in range(out["chunks"]["IHDR"]["data"]["width"]):
                             data_offset = (y*out["chunks"]["IHDR"]["data"]["width"] + x) * pixel_size + (y + 1) # For filter bytes
 
                             raw_pixel_data = chunk_data_bytes[data_offset:data_offset + pixel_size]
-                            #chunk_data_bytes = chunk_data_bytes[pixel_size:]
 
                             if self.log_level > 1: print(f"Read {pixel_size} bytes ({channel_count}*{int(out["chunks"]["IHDR"]["data"]["bit_depth"]/8)}) on offset {data_offset}: {list(raw_pixel_data)}")
 
-                            # Split into colors.
-                            pixel_data = [raw_pixel_data[i] for i in range(0, channel_count, 1)]
-
-                            scanline.append(pixel_data)
-
-                        out["chunks"]["IDAT"]["data"]["matrix"].append(scanline)
-                        if self.log_level > 0: print(f"Reading IDAT chunk: {y+1}/{out["chunks"]["IHDR"]["data"]["height"]}", end="\r")
-
-                    if self.log_level > 0: print(f"\n")
-
-                    start_time = time.time()
-
-                    # Process filters
-                    for y, scanline in enumerate(out["chunks"]["IDAT"]["data"]["matrix"]):
-                        filter_type = out["chunks"]["IDAT"]["data"]["filter"][y]
-
-                        if self.log_level > 0: print(f"Processing filter ({filter_type}): {y+1}/{out["chunks"]["IHDR"]["data"]["height"]}", end="\r")
-
-                        for x in range(len(scanline)):
                             """
                             c b
                             a x
                             Where X is the current pixel
                             """
 
-                            if x == 0:
-                                a, c = [0, 0, 0, 0], [0, 0, 0, 0]
-                            else:
-                                a = out["chunks"]["IDAT"]["data"]["matrix"][y][x - 1]
-                                c = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x - 1]
-                            
-                            if y == 0:
-                                b = [0, 0, 0, 0]
-                            else:
-                                b = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x]
+                            a = scanline[x - 1] if x > 0 else [0, 0, 0, 0]
+                            b = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x] if y > 0 else [0, 0, 0, 0]
+                            c = out["chunks"]["IDAT"]["data"]["matrix"][y - 1][x - 1] if x > 0 and y > 0 else [0, 0, 0, 0]
 
-                            pixel_value = scanline[x]
+                            pixel_value : list
 
                             # Iterate over each channel in the pixel and apply the filter
-                            for channel in range(len(scanline[x])):
-                                match filter_type:
-                                    case 0:
-                                        # No filter
-                                        """ Recon(x) = Filt(x) """
-                                        pass
+                            if filter_type == 0:
+                                # No filter
+                                """ Recon(x) = Filt(x) """
 
-                                    case 1:
-                                        # Sub filter
-                                        """ Recon(x) = Filt(x) + Recon(a) """
+                                pixel_value = [raw_pixel_data[channel] for channel in range(channel_count)]
 
-                                        pixel_value[channel] += a[channel]
+                            if filter_type == 1:
+                                # Sub filter
+                                """ Recon(x) = Filt(x) + Recon(a) """
 
-                                    case 2:
-                                        # Up filter
-                                        """ Recon(x) = Filt(x) + Recon(b) """
+                                pixel_value = [raw_pixel_data[channel] + a[channel] for channel in range(channel_count)]
 
-                                        pixel_value[channel] += b[channel]
+                            if filter_type == 2:
+                                # Up filter
+                                """ Recon(x) = Filt(x) + Recon(b) """
 
-                                    case 3:
-                                        # Average filter
-                                        """ Recon(x) = Filt(x) + floor((Recon(a) + Recon(b)) / 2) """
+                                pixel_value = [raw_pixel_data[channel] + b[channel] for channel in range(channel_count)]
 
-                                        pixel_value[channel] += int((a[channel] + b[channel]) / 2)
+                            if filter_type == 3:
+                                # Average filter
+                                """ Recon(x) = Filt(x) + floor((Recon(a) + Recon(b)) / 2) """
 
-                                    case 4:
-                                        # Paeth filter
-                                        """ Recon(x) = Filt(x) + PaethPredictor(Recon(a), Recon(b), Recon(c)) """
+                                pixel_value = [raw_pixel_data[channel] + int((a[channel] + b[channel]) / 2) for channel in range(channel_count)]
 
-                                        pixel_value[channel] += self._paeth_predictor(a[channel], b[channel], c[channel])
+                            if filter_type == 4:
+                                # Paeth filter
+                                """ Recon(x) = Filt(x) + PaethPredictor(Recon(a), Recon(b), Recon(c)) """
+
+                                pixel_value = [raw_pixel_data[channel] + self._paeth_predictor(a[channel], b[channel], c[channel]) for channel in range(channel_count)]
 
                             # Create RGBA format
                             match out["chunks"]["IHDR"]["data"]["color_type"]:
                                 case PNG._color_type_grayscale:
                                     # Convert to grayscale image
-                                    brightness = pixel_value[0]
-                                    pixel_value = [brightness, brightness, brightness, 255]
+                                    pixel_value += [pixel_value[0], pixel_value[0], 255]
 
                                 case PNG._color_type_truecolor:
                                     # Add alpha
@@ -531,11 +500,12 @@ class PNG:
                                     # Replace with color from the palette
                                     pixel_value = out["chunks"]["PLTE"]["data"][pixel_value[0]]
 
-                            out["chunks"]["IDAT"]["data"]["matrix"][y][x] = [c % 256 for c in pixel_value]
+                            scanline.append([c % 256 for c in pixel_value])
 
-                    end_time = time.time()
+                        out["chunks"]["IDAT"]["data"]["matrix"].append(scanline)
+                        if self.log_level > 0: print(f"Reading IDAT chunk: {y+1}/{out["chunks"]["IHDR"]["data"]["height"]}", end="\r")
 
-                    if self.log_level > 0: print(f"\n(Took: {end_time - start_time}s)")
+                    if self.log_level > 0: print(f"\n")
 
                 case "tEXt":
                     chunk_data_bytes = out["chunks"]["tEXt"]["data_bytes"]
